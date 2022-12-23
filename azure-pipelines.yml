@@ -1,22 +1,69 @@
-# Node.js
-# Build a general Node.js project with npm.
-# Add steps that analyze code, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
-
 trigger:
-- master
+- main
+
+variables:
+  solutionDir: './'
+  #azureServiceConnection: 'sp-az400-azdocker-serviceconn'
+  subscriptionId: 'ae0d5ee9-54ad-466f-9db6-4301e35952b4'
+  resourceGroup: 'rg-UnitTestDemo'
+  location: 'northeurope'
 
 pool:
   vmImage: ubuntu-latest
 
-steps:
-- task: NodeTool@0
-  inputs:
-    versionSpec: '10.x'
-  displayName: 'Install Node.js'
+stages:
+- stage: build
+  jobs:
+    - job: build
+      steps:
+      - script: pwd
+        displayName: 'what directory are we in?'
 
-- script: |
-    npm install
-    npm run build
-    npm test
-  displayName: 'npm install, build, and test'  
+      - script: ls -la
+        displayName: 'what files are in this folder?'
+
+      - script: docker --version
+        displayName: 'docker version'
+        workingDirectory: '$(solutionDir)'
+    
+      - task: UseDotNet@2
+        displayName: 'Install .NET Core 2.1 SDK'
+        inputs:
+          version: '2.1.x'
+          packageType: sdk
+    
+      - script: dotnet build
+        displayName: 'dotnet build'
+        workingDirectory: '$(solutionDir)'
+
+      - task: DotNetCoreCLI@2
+        displayName: run unit tests
+        inputs:
+          command: 'test'
+          workingDirectory: '$(solutiondir)/test/UnitTestDemo.Tests'
+      
+      - script: dotnet publish -o $(build.artifactStagingDirectory)
+        displayName: 'publish binaries for database deploy'
+        workingDirectory: '$(solutionDir)'
+
+      - task: DotNetCoreCLI@2
+        displayName: publish web application for azure
+        inputs:
+          command: publish
+          arguments: '-o $(build.artifactStagingDirectory)/for-azure'
+          workingDirectory: '$(solutiondir)/src/UnitTestDemo.WebUi'
+          zipAfterPublish: true
+          publishWebProjects: true
+      
+      - script: ./create-deploy-scripts-folder.sh
+        displayName: 'create deploy scripts folder'
+
+      - script: cp -r ./deploy-scripts $(build.artifactStagingDirectory)/deploy-scripts
+        displayName: copy deploy scripts to artifacts
+
+      - task: PublishPipelineArtifact@1
+        inputs:
+          # targetPath: '$(Pipeline.Workspace)'
+          targetPath: '$(build.artifactStagingDirectory)'
+          artifact: 'drop'
+          publishLocation: 'pipeline'
